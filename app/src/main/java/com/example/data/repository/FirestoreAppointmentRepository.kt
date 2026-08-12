@@ -8,6 +8,7 @@ import com.example.data.model.AppointmentType
 import com.example.data.model.NotificationReminder
 import com.example.data.model.ReminderConfig
 import com.example.data.model.ReminderType
+import com.example.di.AppContainer
 import com.example.notifications.AppointmentNotificationManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -151,6 +152,41 @@ class FirestoreAppointmentRepository : AppointmentRepository {
         }
     }
 
+    /**
+     * Build a map of child IDs to child names for notification display.
+     * First tries to get from FamilyRepository's current state,
+     * falls back to local preferences if needed.
+     */
+    private fun getChildrenNamesMap(): Map<String, String> {
+        return try {
+            val childrenMap = mutableMapOf<String, String>()
+            
+            // Try to get from FamilyRepository's current children state
+            val familyRepository = AppContainer.familyRepository
+            // Note: We access children via reflection/internal state since there's no public getter
+            // Alternative: we build from SharedPreferences like rescheduleAlarms() does
+            
+            val context = MawaeednaApplication.appContext ?: return emptyMap()
+            val familyPrefs = context.getSharedPreferences("mawaeedna_local_family_prefs", Context.MODE_PRIVATE)
+            val childrenJson = familyPrefs.getString("children_json", null)
+            if (childrenJson != null) {
+                val array = JSONArray(childrenJson)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val id = obj.optString("id")
+                    val name = obj.optString("name")
+                    if (id.isNotBlank() && name.isNotBlank()) {
+                        childrenMap[id] = name
+                    }
+                }
+            }
+            childrenMap
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyMap()
+        }
+    }
+
     private val _appointmentsState = MutableStateFlow<List<Appointment>>(emptyList())
     private val _remindersState = MutableStateFlow<List<NotificationReminder>>(emptyList())
 
@@ -179,7 +215,8 @@ class FirestoreAppointmentRepository : AppointmentRepository {
             _appointmentsState.value = list
             try {
                 MawaeednaApplication.appContext?.let { ctx ->
-                    AppointmentNotificationManager.syncAllLocalNotifications(ctx, emptyMap(), list)
+                    val childrenMap = getChildrenNamesMap()
+                    AppointmentNotificationManager.syncAllLocalNotifications(ctx, childrenMap, list)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -273,7 +310,8 @@ class FirestoreAppointmentRepository : AppointmentRepository {
                 // Sync local notifications on this device
                 try {
                     MawaeednaApplication.appContext?.let { ctx ->
-                        AppointmentNotificationManager.syncAllLocalNotifications(ctx, emptyMap(), list)
+                        val childrenMap = getChildrenNamesMap()
+                        AppointmentNotificationManager.syncAllLocalNotifications(ctx, childrenMap, list)
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -305,9 +343,11 @@ class FirestoreAppointmentRepository : AppointmentRepository {
             saveLocalAppointmentsToPrefs(newList)
             try {
                 MawaeednaApplication.appContext?.let { context ->
+                    val childrenMap = getChildrenNamesMap()
+                    val childName = childrenMap[appToSave.childId] ?: "الطفل"
                     AppointmentNotificationManager.scheduleLocalNotificationsForAppointment(
                         context,
-                        "الطفل",
+                        childName,
                         appToSave
                     )
                 }
@@ -329,9 +369,11 @@ class FirestoreAppointmentRepository : AppointmentRepository {
         // Schedule local notification on this device immediately
         try {
             MawaeednaApplication.appContext?.let { context ->
+                val childrenMap = getChildrenNamesMap()
+                val childName = childrenMap[appToSave.childId] ?: "الطفل"
                 AppointmentNotificationManager.scheduleLocalNotificationsForAppointment(
                     context,
-                    "الطفل",
+                    childName,
                     appToSave
                 )
             }
@@ -343,6 +385,9 @@ class FirestoreAppointmentRepository : AppointmentRepository {
     override fun updateAppointment(appointment: Appointment) {
         val currentUserId = activeUserId ?: FirebaseAuth.getInstance().currentUser?.uid ?: return
         val updated = appointment.copy(updatedAt = System.currentTimeMillis())
+        
+        // Get the old appointment to cancel its alarms
+        val oldAppointment = _appointmentsState.value.find { it.id == updated.id }
 
         if (currentUserId.startsWith("local_")) {
             val newList = _appointmentsState.value.map {
@@ -352,9 +397,20 @@ class FirestoreAppointmentRepository : AppointmentRepository {
             saveLocalAppointmentsToPrefs(newList)
             try {
                 MawaeednaApplication.appContext?.let { context ->
+                    // Cancel old alarms first if appointment exists
+                    if (oldAppointment != null) {
+                        AppointmentNotificationManager.cancelLocalNotificationsForAppointment(
+                            context,
+                            updated.id,
+                            oldAppointment.reminders
+                        )
+                    }
+                    // Schedule new alarms
+                    val childrenMap = getChildrenNamesMap()
+                    val childName = childrenMap[updated.childId] ?: "الطفل"
                     AppointmentNotificationManager.scheduleLocalNotificationsForAppointment(
                         context,
-                        "الطفل",
+                        childName,
                         updated
                     )
                 }
@@ -376,9 +432,20 @@ class FirestoreAppointmentRepository : AppointmentRepository {
         // Reschedule local notification
         try {
             MawaeednaApplication.appContext?.let { context ->
+                // Cancel old alarms first if appointment exists
+                if (oldAppointment != null) {
+                    AppointmentNotificationManager.cancelLocalNotificationsForAppointment(
+                        context,
+                        updated.id,
+                        oldAppointment.reminders
+                    )
+                }
+                // Schedule new alarms
+                val childrenMap = getChildrenNamesMap()
+                val childName = childrenMap[updated.childId] ?: "الطفل"
                 AppointmentNotificationManager.scheduleLocalNotificationsForAppointment(
                     context,
-                    "الطفل",
+                    childName,
                     updated
                 )
             }
@@ -461,7 +528,8 @@ class FirestoreAppointmentRepository : AppointmentRepository {
         saveLocalAppointmentsToPrefs(appointments)
         try {
             MawaeednaApplication.appContext?.let { ctx ->
-                AppointmentNotificationManager.syncAllLocalNotifications(ctx, emptyMap(), appointments)
+                val childrenMap = getChildrenNamesMap()
+                AppointmentNotificationManager.syncAllLocalNotifications(ctx, childrenMap, appointments)
             }
         } catch (e: Exception) {
             e.printStackTrace()
