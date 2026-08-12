@@ -44,8 +44,8 @@ object PdfReportHelper {
         val document = PdfDocument()
         var pageNumber = 1
         var currentY = MARGIN
-        var page = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
-        var canvas = document.startPage(page).canvas
+        var page = document.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create())
+        var canvas = page.canvas
 
         // Title
         currentY = drawTitle(canvas, "تقرير نتائج التحاليل الطبية", currentY)
@@ -78,10 +78,10 @@ object PdfReportHelper {
         // Results rows
         for (result in results) {
             if (currentY + LINE_HEIGHT > PAGE_HEIGHT - MARGIN) {
-                document.finishPage(canvas)
+                document.finishPage(page)
                 pageNumber++
-                page = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
-                canvas = document.startPage(page).canvas
+                page = document.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create())
+                canvas = page.canvas
                 currentY = MARGIN
             }
 
@@ -108,7 +108,7 @@ object PdfReportHelper {
         currentY = PAGE_HEIGHT - MARGIN
         drawText(canvas, footer, currentY, 10f)
 
-        document.finishPage(canvas)
+        document.finishPage(page)
 
         // Convert to ByteArray
         val outputStream = ByteArrayOutputStream()
@@ -130,8 +130,8 @@ object PdfReportHelper {
         val document = PdfDocument()
         var pageNumber = 1
         var currentY = MARGIN
-        var page = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
-        var canvas = document.startPage(page).canvas
+        var page = document.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create())
+        var canvas = page.canvas
 
         // Title
         currentY = drawTitle(canvas, "تقرير قراءات السكر اليومية", currentY)
@@ -173,10 +173,10 @@ object PdfReportHelper {
         // Readings rows
         for ((index, reading) in readings.withIndex()) {
             if (currentY + LINE_HEIGHT > PAGE_HEIGHT - MARGIN) {
-                document.finishPage(canvas)
+                document.finishPage(page)
                 pageNumber++
-                page = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
-                canvas = document.startPage(page).canvas
+                page = document.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create())
+                canvas = page.canvas
                 currentY = MARGIN
             }
 
@@ -203,7 +203,7 @@ object PdfReportHelper {
         currentY = PAGE_HEIGHT - MARGIN
         drawText(canvas, footer, currentY, 10f)
 
-        document.finishPage(canvas)
+        document.finishPage(page)
 
         // Convert to ByteArray
         val outputStream = ByteArrayOutputStream()

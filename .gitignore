@@ -16,3 +16,7 @@
 local.properties
 .env
 debug.keystore
+
+# Local Firebase / signing files
+app/google-services.json
+debug.keystore
