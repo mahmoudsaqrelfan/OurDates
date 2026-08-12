@@ -1,0 +1,6 @@
+{
+  "name": "مواعيدنا",
+  "description": "منظم صحة ومواعيد العائلة لمتابعة المواعيد والفحوصات والتحاليل وقياسات السكر للأسرة بكل سهولة",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
