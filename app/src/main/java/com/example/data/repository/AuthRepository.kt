@@ -98,14 +98,6 @@ class FirebaseAuthRepository : AuthRepository {
                     email = firebaseUser.email ?: "",
                     photoUrl = firebaseUser.photoUrl?.toString()
                 )
-            } else if (isLoggedIn && !savedUserId.isNullOrEmpty() && !savedUserId.startsWith("local_")) {
-                UserProfile(
-                    id = savedUserId,
-                    googleUserId = prefs.getString(KEY_GOOGLE_ID, savedUserId) ?: savedUserId,
-                    displayName = prefs.getString(KEY_NAME, "أحمد علي") ?: "أحمد علي",
-                    email = prefs.getString(KEY_EMAIL, "user@gmail.com") ?: "user@gmail.com",
-                    photoUrl = prefs.getString(KEY_PHOTO_URL, null)
-                )
             } else {
                 null
             }
@@ -147,7 +139,7 @@ class FirebaseAuthRepository : AuthRepository {
         _authState.value = AuthState.Authenticating
         return try {
             val userProfile = tryCredentialManagerSignIn(context)
-                ?: fallbackDemoGoogleSignIn(context)
+                ?: throw Exception("تعذر تسجيل الدخول عبر Google.")
 
             _currentUser.value = userProfile
             _authState.value = AuthState.Authenticated(userProfile)
@@ -174,7 +166,7 @@ class FirebaseAuthRepository : AuthRepository {
             val credentialManager = androidx.credentials.CredentialManager.create(context)
             val googleOption = com.google.android.libraries.identity.googleid.GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
-                .setServerClientId("YOUR_WEB_CLIENT_ID") // Generic client ID pattern
+                .setServerClientId("708784318523-e8g1gpqi2s1b1icl3u6s1khrn8i3rje2.apps.googleusercontent.com")
                 .setAutoSelectEnabled(false)
                 .build()
 
@@ -204,22 +196,8 @@ class FirebaseAuthRepository : AuthRepository {
             }
             null
         } catch (e: Exception) {
-            // Log or ignore to allow fallback
-            null
+            throw e
         }
-    }
-
-    private fun fallbackDemoGoogleSignIn(context: Context): UserProfile {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val existingId = prefs.getString(KEY_USER_ID, "google_user_1001")!!
-
-        return UserProfile(
-            id = existingId,
-            googleUserId = "google_user_1001",
-            displayName = "أحمد علي",
-            email = "ahmed.ali.mawaeedna@gmail.com",
-            photoUrl = null
-        )
     }
 
     private fun saveUserToPrefs(context: Context, user: UserProfile, isLocal: Boolean = false) {
