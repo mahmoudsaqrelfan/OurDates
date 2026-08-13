@@ -19,15 +19,19 @@ class FirestoreGoogleDataLinkRepository : GoogleDataLinkRepository {
         val userRef = db.collection("users").document(userId)
 
         root.optJSONObject("family")?.let { familyObj ->
-            val localMap = jsonObjectToMap(familyObj).toMutableMap().apply {
-                this["id"] = "fam_$userId"
-                this["ownerUserId"] = userId
+            val familyRef = userRef.collection("family").document("profile")
+            val remote = familyRef.get().await()
+            val localName = familyObj.optString("familyName", "عائلتي")
+            val localUpdatedAt = familyObj.optLong("updatedAt", 0L)
+            val remoteUpdatedAt = remote.getLong("updatedAt") ?: 0L
+            val shouldWrite = !remote.exists() || (localName != "عائلتي" && localUpdatedAt >= remoteUpdatedAt)
+            if (shouldWrite) {
+                val localMap = jsonObjectToMap(familyObj).toMutableMap().apply {
+                    this["id"] = "fam_$userId"
+                    this["ownerUserId"] = userId
+                }
+                familyRef.set(localMap, SetOptions.merge()).await()
             }
-            mergeDocumentIfNewer(
-                userRef.collection("family").document("profile"),
-                localMap,
-                familyObj.optLong("updatedAt", 0L)
-            )
         }
 
         mergeArrayCollection(root.optJSONArray("children"), userId, "children") { map ->
@@ -57,7 +61,8 @@ class FirestoreGoogleDataLinkRepository : GoogleDataLinkRepository {
         val collection = db.collection("users").document(userId).collection(collectionName)
         for (index in 0 until array.length()) {
             val obj = array.optJSONObject(index) ?: continue
-            val id = obj.optString("id").ifBlank { continue }
+            val id = obj.optString("id")
+            if (id.isBlank()) continue
             val map = transform(jsonObjectToMap(obj))
             val remote = collection.document(id).get().await()
             val localUpdatedAt = obj.optLong("updatedAt", 0L)
@@ -65,18 +70,6 @@ class FirestoreGoogleDataLinkRepository : GoogleDataLinkRepository {
             if (!remote.exists() || localUpdatedAt >= remoteUpdatedAt) {
                 collection.document(id).set(map, SetOptions.merge()).await()
             }
-        }
-    }
-
-    private suspend fun mergeDocumentIfNewer(
-        document: com.google.firebase.firestore.DocumentReference,
-        localMap: Map<String, Any?>,
-        localUpdatedAt: Long
-    ) {
-        val remote = document.get().await()
-        val remoteUpdatedAt = remote.getLong("updatedAt") ?: 0L
-        if (!remote.exists() || localUpdatedAt >= remoteUpdatedAt) {
-            document.set(localMap, SetOptions.merge()).await()
         }
     }
 
