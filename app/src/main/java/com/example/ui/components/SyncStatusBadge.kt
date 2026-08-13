@@ -24,6 +24,7 @@ fun SyncStatusBadge(
     modifier: Modifier = Modifier
 ) {
     val (bgColor, textColor) = when (syncStatus) {
+        SyncStatus.LOCAL -> Color(0xFFE3F2FD) to Color(0xFF1565C0)
         SyncStatus.CONNECTED -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
         SyncStatus.SYNCING -> Color(0xFFFFF8E1) to Color(0xFFF57F17)
         SyncStatus.OFFLINE -> Color(0xFFECEFF1) to Color(0xFF455A64)
@@ -39,10 +40,7 @@ fun SyncStatusBadge(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = syncStatus.iconEmoji,
-                fontSize = 10.sp
-            )
+            Text(text = syncStatus.iconEmoji, fontSize = 10.sp)
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = syncStatus.labelAr,
