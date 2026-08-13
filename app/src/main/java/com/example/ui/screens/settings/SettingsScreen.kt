@@ -1,5 +1,9 @@
 package com.example.ui.screens.settings
 
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FamilyRestroom
@@ -33,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,30 +52,25 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.data.model.Family
 import com.example.data.model.UserProfile
 import com.example.ui.components.SyncStatusBadge
 import com.example.ui.theme.PastelCyanCard
 import com.example.ui.theme.TealDark
 import com.example.ui.theme.TealPrimary
 import com.example.ui.viewmodels.SettingsViewModel
-
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
-import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 
 @Composable
@@ -79,13 +78,16 @@ fun SettingsScreen(
     currentUser: UserProfile?,
     viewModel: SettingsViewModel = viewModel(),
     onBackClick: () -> Unit,
-    onSignOutClick: () -> Unit
+    onAccountActionClick: () -> Unit,
+    isAccountBusy: Boolean = false,
+    accountErrorMessage: String? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by viewModel.settings.collectAsState()
     val family by viewModel.family.collectAsState()
     val syncStatus by viewModel.syncStatus.collectAsState()
+    val isLocal = currentUser?.id?.startsWith("local_") != false
 
     var backupJsonToSave by remember { mutableStateOf("") }
     var lastBackupUri by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -95,35 +97,33 @@ fun SettingsScreen(
     var showConfirmRestoreDialog by remember { mutableStateOf(false) }
     var pendingRestoreJson by remember { mutableStateOf("") }
     var showRestoreSuccessDialog by remember { mutableStateOf(false) }
+    var showEditFamilyNameDialog by remember { mutableStateOf(false) }
+    var familyNameInput by remember { mutableStateOf(family.familyName) }
 
     fun shareBackupFile(uri: android.net.Uri) {
         try {
-            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "application/octet-stream"
                 putExtra(android.content.Intent.EXTRA_STREAM, uri)
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(android.content.Intent.createChooser(shareIntent, "مشاركة النسخة الاحتياطية"))
+            context.startActivity(android.content.Intent.createChooser(intent, "مشاركة النسخة الاحتياطية"))
         } catch (e: Exception) {
-            e.printStackTrace()
             errorMessage = "فشل مشاركة ملف النسخة الاحتياطية: ${e.localizedMessage}"
             showErrorDialog = true
         }
     }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+        ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         if (uri != null) {
             scope.launch {
                 try {
-                    context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                        outputStream.write(backupJsonToSave.toByteArray())
-                    }
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(backupJsonToSave.toByteArray()) }
                     lastBackupUri = uri
                     showBackupSuccessDialog = true
                 } catch (e: Exception) {
-                    e.printStackTrace()
                     errorMessage = "فشل حفظ ملف النسخة الاحتياطية: ${e.localizedMessage}"
                     showErrorDialog = true
                 }
@@ -131,25 +131,21 @@ fun SettingsScreen(
         }
     }
 
-    val openDocumentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
+    val openDocumentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             scope.launch {
                 try {
-                    val jsonString = context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                        inputStream.bufferedReader().use { it.readText() }
-                    } ?: ""
-
-                    if (viewModel.validateBackupJson(jsonString)) {
-                        pendingRestoreJson = jsonString
+                    val json = context.contentResolver.openInputStream(uri)?.use { input ->
+                        input.bufferedReader().use { it.readText() }
+                    }.orEmpty()
+                    if (viewModel.validateBackupJson(json)) {
+                        pendingRestoreJson = json
                         showConfirmRestoreDialog = true
                     } else {
                         errorMessage = "ملف النسخة الاحتياطية غير صالح أو غير متوافق."
                         showErrorDialog = true
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
                     errorMessage = "فشل قراءة ملف النسخة الاحتياطية: ${e.localizedMessage}"
                     showErrorDialog = true
                 }
@@ -160,564 +156,292 @@ fun SettingsScreen(
     var hasNotificationPermission by remember {
         mutableStateOf(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ContextCompat.checkSelfPermission(
-                    context,
-                    android.Manifest.permission.POST_NOTIFICATIONS
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
             } else true
         )
     }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        hasNotificationPermission = isGranted
-        if (isGranted) {
-            viewModel.updateSettings(settings.copy(notificationsEnabled = true))
-        }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasNotificationPermission = granted
+        if (granted) viewModel.updateSettings(settings.copy(notificationsEnabled = true))
     }
-
-    var showEditFamilyNameDialog by remember { mutableStateOf(false) }
-    var familyNameInput by remember { mutableStateOf(family.familyName) }
 
     if (showEditFamilyNameDialog) {
         AlertDialog(
             onDismissRequest = { showEditFamilyNameDialog = false },
-            title = {
-                Text(
-                    text = "تعديل اسم الأسرة",
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1E293B)
-                )
-            },
+            title = { Text("تعديل اسم الأسرة", fontWeight = FontWeight.Bold) },
             text = {
                 OutlinedTextField(
                     value = familyNameInput,
                     onValueChange = { familyNameInput = it },
                     label = { Text("اسم الأسرة") },
                     singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("edit_family_name_input"),
-                    shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier.fillMaxWidth().testTag("edit_family_name_input")
                 )
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (familyNameInput.isNotBlank()) {
-                            viewModel.updateFamilyName(familyNameInput)
-                            showEditFamilyNameDialog = false
-                        }
-                    },
-                    enabled = familyNameInput.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("save_family_name_button")
-                ) {
-                    Text("حفظ", fontWeight = FontWeight.Bold)
-                }
+                Button(onClick = {
+                    if (familyNameInput.isNotBlank()) {
+                        viewModel.updateFamilyName(familyNameInput)
+                        showEditFamilyNameDialog = false
+                    }
+                }) { Text("حفظ") }
             },
-            dismissButton = {
-                TextButton(onClick = { showEditFamilyNameDialog = false }) {
-                    Text("إلغاء", color = Color(0xFF64748B))
-                }
-            },
-            shape = RoundedCornerShape(20.dp),
-            containerColor = Color.White
+            dismissButton = { TextButton(onClick = { showEditFamilyNameDialog = false }) { Text("إلغاء") } }
         )
     }
 
     Surface(
-        modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .testTag("settings_screen"),
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).testTag("settings_screen"),
         color = Color(0xFFF7FBFB)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 20.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = 24.dp)
+            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)
+                .verticalScroll(rememberScrollState()).padding(bottom = 24.dp)
         ) {
-            // Header Bar
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBackClick) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "رجوع",
-                        tint = TealDark
-                    )
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = TealDark)
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "الإعدادات العامة",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 22.sp,
-                        color = TealDark
-                    )
-                )
+                Spacer(Modifier.width(8.dp))
+                Text("الإعدادات العامة", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = TealDark))
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // User Profile Section
-            Text(
-                text = "الحساب المسجل 👤",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1E293B)
-                )
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
+            SectionTitle("الحفظ والمزامنة ☁️")
+            Spacer(Modifier.height(8.dp))
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                elevation = CardDefaults.cardElevation(2.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        modifier = Modifier.size(54.dp),
-                        shape = CircleShape,
-                        color = PastelCyanCard
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(modifier = Modifier.size(54.dp), shape = CircleShape, color = PastelCyanCard) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.AccountCircle, contentDescription = null, tint = TealPrimary, modifier = Modifier.size(36.dp))
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                if (isLocal) "بياناتك على هذا الجهاز" else currentUser?.displayName ?: "حساب Google",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1E293B)
+                            )
+                            Text(
+                                if (isLocal) "Google غير مربوط — يمكنك المزامنة في أي وقت" else currentUser?.email.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                        SyncStatusBadge(syncStatus)
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        if (isLocal)
+                            "البيانات الحالية هي الأصل على جهازك. عند ربط Google سيتم دمجها بأمان مع بياناتك السحابية ولن تُعامل كحساب منفصل."
+                        else
+                            "Google مرتبط للمزامنة. ستظهر نفس البيانات على أجهزتك المرتبطة بهذا الحساب. إيقاف المزامنة لا يحذف بيانات الجهاز ولا النسخة الموجودة على Google.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF64748B),
+                        lineHeight = 18.sp
+                    )
+
+                    if (!accountErrorMessage.isNullOrBlank()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(accountErrorMessage, color = Color(0xFFC62828), style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+                    Button(
+                        onClick = onAccountActionClick,
+                        enabled = !isAccountBusy,
+                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("google_sync_action_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isLocal) TealPrimary else Color(0xFFFFF3E0),
+                            contentColor = if (isLocal) Color.White else Color(0xFFE65100)
+                        ),
+                        shape = RoundedCornerShape(14.dp)
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.AccountCircle,
-                                contentDescription = currentUser?.displayName ?: "المستخدم",
-                                tint = TealPrimary,
-                                modifier = Modifier.size(36.dp)
+                        if (isAccountBusy) {
+                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(
+                                if (isLocal) "ربط بحساب Google للمزامنة" else "إيقاف مزامنة Google",
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = currentUser?.displayName ?: "أحمد علي",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = Color(0xFF1E293B)
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = currentUser?.email ?: "ahmed@example.com",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 13.sp,
-                                color = Color(0xFF64748B)
-                            )
-                        )
-                    }
-
-                    SyncStatusBadge(syncStatus = syncStatus)
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Family Profile Settings Section
-            Text(
-                text = "إدارة الأسرة 👨‍👩‍👧‍👦",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1E293B)
-                )
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
+            Spacer(Modifier.height(20.dp))
+            SectionTitle("إدارة الأسرة 👨‍👩‍👧‍👦")
+            Spacer(Modifier.height(8.dp))
             SettingItemCard(
                 icon = Icons.Default.FamilyRestroom,
                 title = "اسم الأسرة",
                 subtitle = family.familyName,
                 trailing = {
-                    IconButton(
-                        onClick = {
-                            familyNameInput = family.familyName
-                            showEditFamilyNameDialog = true
-                        },
-                        modifier = Modifier.testTag("edit_family_name_icon_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "تعديل اسم الأسرة",
-                            tint = TealPrimary
-                        )
-                    }
+                    IconButton(onClick = {
+                        familyNameInput = family.familyName
+                        showEditFamilyNameDialog = true
+                    }) { Icon(Icons.Default.Edit, contentDescription = "تعديل", tint = TealPrimary) }
                 }
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // App Preferences
-            Text(
-                text = "التفضيلات والمظهر 🎨",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1E293B)
-                )
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
+            Spacer(Modifier.height(20.dp))
+            SectionTitle("التفضيلات والمظهر 🎨")
+            Spacer(Modifier.height(8.dp))
             SettingItemCard(
                 icon = Icons.Default.Notifications,
                 title = "الإشعارات والتنبيهات المحليّة",
-                subtitle = if (hasNotificationPermission) "إشعارات تذكير المواعيد والتطعيمات مفعلة" else "الإذن غير مفعّل - انقر للتفعيل",
+                subtitle = if (hasNotificationPermission) "إشعارات التذكير مفعلة" else "انقر للتفعيل",
                 trailing = {
                     Switch(
                         checked = settings.notificationsEnabled && hasNotificationPermission,
                         onCheckedChange = { checked ->
                             if (checked && !hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                            } else {
-                                viewModel.updateSettings(settings.copy(notificationsEnabled = checked))
-                            }
+                            } else viewModel.updateSettings(settings.copy(notificationsEnabled = checked))
                         },
                         colors = SwitchDefaults.colors(checkedThumbColor = TealPrimary)
                     )
                 }
             )
+            Spacer(Modifier.height(8.dp))
+            SettingItemCard(Icons.Default.Language, "اللغة (Language)", "العربية") { Text("افتراضي", color = TealDark) }
+            Spacer(Modifier.height(8.dp))
+            SettingItemCard(Icons.Default.Palette, "المظهر (Theme)", "طبي هادئ") { Text("Pastel", color = Color(0xFF0288D1)) }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            SettingItemCard(
-                icon = Icons.Default.Language,
-                title = "اللغة (Language)",
-                subtitle = "العربية",
-                trailing = {
-                    Text(
-                        text = "افتراضي",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = TealDark)
-                    )
-                }
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            SettingItemCard(
-                icon = Icons.Default.Palette,
-                title = "المظهر (Theme)",
-                subtitle = "طبي هادئ",
-                trailing = {
-                    Text(
-                        text = "Pastel",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF0288D1))
-                    )
-                }
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Text(
-                text = "💾 النسخ الاحتياطي والاستعادة",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1E293B)
-                )
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
+            Spacer(Modifier.height(20.dp))
+            SectionTitle("💾 النسخ الاحتياطي والاستعادة")
+            Spacer(Modifier.height(8.dp))
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("backup_restore_card"),
+                modifier = Modifier.fillMaxWidth().testTag("backup_restore_card"),
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                colors = CardDefaults.cardColors(containerColor = Color.White)
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
+                Column(Modifier.padding(16.dp)) {
                     Text(
-                        text = "النسخ الاحتياطي المحلي يدوي بالكامل ويعمل دون الحاجة لاتصال بالإنترنت. يحفظ ملف البيانات بأمان على جهازك ويمكنك استعادته لاحقاً.",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF64748B)),
-                        lineHeight = 18.sp
+                        if (isLocal)
+                            "النسخة الاحتياطية اليدوية تُحفظ على جهازك."
+                        else
+                            "النسخة الاحتياطية اليدوية تعمل بجانب مزامنة Google. عند الاستعادة سيتم دمج البيانات المستعادة مع حساب Google المرتبط.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF64748B)
                     )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Spacer(Modifier.height(16.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = {
                                 scope.launch {
                                     backupJsonToSave = viewModel.createBackupJson()
-                                    val timeStr = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm", java.util.Locale.US).format(java.util.Date())
-                                    val fileName = "Mawaeedna_Backup_$timeStr.mwbackup"
-                                    createDocumentLauncher.launch(fileName)
+                                    val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm", java.util.Locale.US).format(java.util.Date())
+                                    createDocumentLauncher.launch("Mawaeedna_Backup_$stamp.mwbackup")
                                 }
                             },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                                .testTag("create_backup_button"),
-                            colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("نسخ احتياطي", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                        }
-
+                            modifier = Modifier.weight(1f).height(46.dp).testTag("create_backup_button")
+                        ) { Text("نسخ احتياطي", fontWeight = FontWeight.Bold) }
                         OutlinedButton(
-                            onClick = {
-                                openDocumentLauncher.launch(arrayOf("*/*"))
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                                .testTag("restore_backup_button"),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TealPrimary),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, TealPrimary),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("استعادة البيانات", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
+                            onClick = { openDocumentLauncher.launch(arrayOf("*/*")) },
+                            modifier = Modifier.weight(1f).height(46.dp).testTag("restore_backup_button"),
+                            border = BorderStroke(1.dp, TealPrimary)
+                        ) { Text("استعادة البيانات", fontWeight = FontWeight.Bold) }
                     }
-
                     if (lastBackupUri != null) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedButton(
-                            onClick = {
-                                lastBackupUri?.let { shareBackupFile(it) }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(42.dp)
-                                .testTag("share_backup_button"),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0288D1)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0288D1)),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("مشاركة ملف النسخة الأخيرة 📤", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(onClick = { lastBackupUri?.let(::shareBackupFile) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("مشاركة ملف النسخة الأخيرة 📤")
                         }
                     }
                 }
             }
 
-            // Dialogs for Backup & Restore
-            if (showBackupSuccessDialog) {
-                AlertDialog(
-                    onDismissRequest = { showBackupSuccessDialog = false },
-                    title = {
-                        Text(
-                            text = "تم إنشاء النسخة الاحتياطية بنجاح 💾",
-                            fontWeight = FontWeight.Bold,
-                            color = TealDark
-                        )
-                    },
-                    text = {
-                        Text("تم حفظ ملف النسخة الاحتياطية بأمان على جهازك. يمكنك الآن مشاركتها أو نقلها لاستعادتها لاحقاً.")
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                showBackupSuccessDialog = false
-                                lastBackupUri?.let { shareBackupFile(it) }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("مشاركة النسخة الاحتياطية 📤", fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showBackupSuccessDialog = false }) {
-                            Text("إغلاق", color = Color(0xFF64748B))
-                        }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    containerColor = Color.White
-                )
-            }
-
-            if (showConfirmRestoreDialog) {
-                AlertDialog(
-                    onDismissRequest = { showConfirmRestoreDialog = false },
-                    title = {
-                        Text(
-                            text = "استعادة النسخة الاحتياطية ⚠️",
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFC62828)
-                        )
-                    },
-                    text = {
-                        Text("سيتم استبدال البيانات الحالية بالكامل ببيانات النسخة الاحتياطية. هل أنت متأكد من الاستمرار؟")
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                showConfirmRestoreDialog = false
-                                scope.launch {
-                                    val success = viewModel.restoreBackup(pendingRestoreJson)
-                                    if (success) {
-                                        showRestoreSuccessDialog = true
-                                    } else {
-                                        errorMessage = "حدث خطأ أثناء استعادة النسخة الاحتياطية."
-                                        showErrorDialog = true
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("استعادة", fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showConfirmRestoreDialog = false }) {
-                            Text("إلغاء", color = Color(0xFF64748B))
-                        }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    containerColor = Color.White
-                )
-            }
-
-            if (showRestoreSuccessDialog) {
-                AlertDialog(
-                    onDismissRequest = { showRestoreSuccessDialog = false },
-                    title = {
-                        Text(
-                            text = "تمت الاستعادة بنجاح 🎉",
-                            fontWeight = FontWeight.Bold,
-                            color = TealDark
-                        )
-                    },
-                    text = {
-                        Text("تمت استعادة كافة البيانات والإعدادات بنجاح إلى التطبيق.")
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = { showRestoreSuccessDialog = false },
-                            colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("حسناً", fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    containerColor = Color.White
-                )
-            }
-
-            if (showErrorDialog) {
-                AlertDialog(
-                    onDismissRequest = { showErrorDialog = false },
-                    title = {
-                        Text(
-                            text = "تنبيه ❌",
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFC62828)
-                        )
-                    },
-                    text = {
-                        Text(errorMessage)
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = { showErrorDialog = false },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("حسناً", fontWeight = FontWeight.Bold)
-                        }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    containerColor = Color.White
-                )
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // Logout Button
-            Button(
-                onClick = onSignOutClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("logout_button"),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFFFEBEE),
-                    contentColor = Color(0xFFC62828)
-                )
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Logout,
-                        contentDescription = "تسجيل الخروج",
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "تسجيل الخروج",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // App Version Note Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = PastelCyanCard)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = TealPrimary
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
+            Spacer(Modifier.height(24.dp))
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = PastelCyanCard)) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = TealPrimary)
+                    Spacer(Modifier.width(12.dp))
                     Column {
-                        Text(
-                            text = "مواعيدنا - الإصدار 2.0",
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = TealDark
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "منظم صحة ومواعيد العائلة - إدارة الحساب، أفراد الأسرة، وGoogle Sign-In.",
-                            style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF475569))
-                        )
+                        Text("مواعيدنا - الإصدار 2.0", fontWeight = FontWeight.Bold, color = TealDark)
+                        Text("بيانات محلية أولاً، مع مزامنة Google اختيارية.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
         }
     }
+
+    if (showBackupSuccessDialog) {
+        AlertDialog(
+            onDismissRequest = { showBackupSuccessDialog = false },
+            title = { Text("تم إنشاء النسخة الاحتياطية بنجاح 💾", fontWeight = FontWeight.Bold) },
+            text = { Text("تم حفظ ملف النسخة الاحتياطية بأمان على جهازك.") },
+            confirmButton = {
+                Button(onClick = {
+                    showBackupSuccessDialog = false
+                    lastBackupUri?.let(::shareBackupFile)
+                }) { Text("مشاركة النسخة 📤") }
+            },
+            dismissButton = { TextButton(onClick = { showBackupSuccessDialog = false }) { Text("إغلاق") } }
+        )
+    }
+
+    if (showConfirmRestoreDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmRestoreDialog = false },
+            title = { Text("استعادة النسخة الاحتياطية ⚠️", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    if (isLocal) "سيتم استبدال بيانات الجهاز الحالية ببيانات النسخة الاحتياطية."
+                    else "سيتم استعادة بيانات النسخة على الجهاز ثم دمجها بأمان مع بيانات Google المرتبطة."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showConfirmRestoreDialog = false
+                    scope.launch {
+                        if (viewModel.restoreBackup(pendingRestoreJson)) showRestoreSuccessDialog = true
+                        else {
+                            errorMessage = "حدث خطأ أثناء استعادة أو مزامنة النسخة الاحتياطية."
+                            showErrorDialog = true
+                        }
+                    }
+                }) { Text("استعادة") }
+            },
+            dismissButton = { TextButton(onClick = { showConfirmRestoreDialog = false }) { Text("إلغاء") } }
+        )
+    }
+
+    if (showRestoreSuccessDialog) {
+        AlertDialog(
+            onDismissRequest = { showRestoreSuccessDialog = false },
+            title = { Text("تمت الاستعادة بنجاح 🎉", fontWeight = FontWeight.Bold) },
+            text = { Text(if (isLocal) "تمت استعادة البيانات على الجهاز." else "تمت استعادة البيانات ودمجها مع Google.") },
+            confirmButton = { Button(onClick = { showRestoreSuccessDialog = false }) { Text("حسناً") } }
+        )
+    }
+
+    if (showErrorDialog) {
+        AlertDialog(
+            onDismissRequest = { showErrorDialog = false },
+            title = { Text("تنبيه ❌", fontWeight = FontWeight.Bold) },
+            text = { Text(errorMessage) },
+            confirmButton = { Button(onClick = { showErrorDialog = false }) { Text("حسناً") } }
+        )
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(text, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color(0xFF1E293B)))
 }
 
 @Composable
@@ -727,51 +451,22 @@ private fun SettingItemCard(
     subtitle: String,
     trailing: @Composable () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
-    ) {
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFFF1F5F9),
-                    modifier = Modifier.padding(end = 12.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.padding(8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = TealPrimary
-                        )
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFFF1F5F9)) {
+                    Box(modifier = Modifier.padding(8.dp), contentAlignment = Alignment.Center) {
+                        Icon(icon, contentDescription = null, tint = TealPrimary)
                     }
                 }
+                Spacer(Modifier.width(12.dp))
                 Column {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E293B)
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            color = Color(0xFF64748B)
-                        )
-                    )
+                    Text(title, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
                 }
             }
             trailing()
