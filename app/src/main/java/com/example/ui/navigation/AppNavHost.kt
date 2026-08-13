@@ -11,6 +11,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.data.repository.AuthState
 import com.example.ui.screens.child.ChildProfileScreen
 import com.example.ui.screens.child.sections.AppointmentsSectionScreen
 import com.example.ui.screens.child.sections.GlucoseSectionScreen
@@ -70,13 +71,10 @@ fun AppNavHost(
             arguments = listOf(navArgument("childId") { type = NavType.StringType })
         ) { backStackEntry ->
             val childId = backStackEntry.arguments?.getString("childId") ?: ""
-            val childDetailViewModel: ChildDetailViewModel = viewModel(
-                key = childId,
-                factory = childDetailFactory(childId)
-            )
+            val vm: ChildDetailViewModel = viewModel(key = childId, factory = childDetailFactory(childId))
             ChildProfileScreen(
                 childId = childId,
-                viewModel = childDetailViewModel,
+                viewModel = vm,
                 onBackClick = { navController.popBackStack() },
                 onOpenAppointments = { navController.navigate(NavRoutes.childAppointments(childId)) },
                 onOpenTests = { navController.navigate(NavRoutes.childTests(childId)) },
@@ -123,14 +121,17 @@ fun AppNavHost(
 
         composable(NavRoutes.SETTINGS) {
             val currentUser by authViewModel.currentUser.collectAsState()
+            val authState by authViewModel.authState.collectAsState()
             val context = LocalContext.current
             val isLocal = currentUser?.id?.startsWith("local_") != false
+            val busy = authState is AuthState.Authenticating
+            val authError = (authState as? AuthState.Error)?.message
 
             SettingsScreen(
                 currentUser = currentUser,
                 viewModel = settingsViewModel,
                 onBackClick = { navController.popBackStack() },
-                onSignOutClick = {
+                onAccountActionClick = {
                     if (isLocal) {
                         authViewModel.linkGoogleForSync(
                             context = context,
@@ -144,7 +145,9 @@ fun AppNavHost(
                             onError = { }
                         )
                     }
-                }
+                },
+                isAccountBusy = busy,
+                accountErrorMessage = authError
             )
         }
     }
