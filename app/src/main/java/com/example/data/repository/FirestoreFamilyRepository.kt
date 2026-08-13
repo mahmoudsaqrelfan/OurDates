@@ -10,6 +10,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.firestoreSettings
@@ -142,7 +143,6 @@ class FirestoreFamilyRepository : FamilyRepository {
                 familyName = "عائلتي"
             ).also(::saveLocalFamilyToPrefs)
 
-            // An explicitly saved empty JSON array is a valid state. Never reseed deleted children.
             val children = loadLocalChildrenFromPrefs(ownerUserId) ?: emptyList<Child>().also(::saveLocalChildrenToPrefs)
             _familyState.value = family
             _childrenState.value = children
@@ -190,7 +190,7 @@ class FirestoreFamilyRepository : FamilyRepository {
         val userDoc = db.collection("users").document(userId)
 
         familyListener = userDoc.collection("family").document("profile")
-            .addSnapshotListener { snapshot, error ->
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                 if (error != null) {
                     _syncStatus.value = SyncStatus.OFFLINE
                     return@addSnapshotListener
@@ -208,13 +208,12 @@ class FirestoreFamilyRepository : FamilyRepository {
             }
 
         childrenListener = userDoc.collection("children")
-            .addSnapshotListener { snapshot, error ->
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                 if (error != null) {
                     _syncStatus.value = SyncStatus.OFFLINE
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
-                    // Empty is a real synchronized state. Do not recreate demo children.
                     _childrenState.value = snapshot.documents.mapNotNull { doc ->
                         try {
                             val gender = try {
@@ -247,7 +246,7 @@ class FirestoreFamilyRepository : FamilyRepository {
         if (snapshot == null) return
         _syncStatus.value = when {
             snapshot.metadata.hasPendingWrites() -> SyncStatus.SYNCING
-            snapshot.metadata.isFromCache -> SyncStatus.OFFLINE
+            snapshot.metadata.isFromCache -> SyncStatus.SYNCING
             else -> SyncStatus.CONNECTED
         }
     }
@@ -256,7 +255,7 @@ class FirestoreFamilyRepository : FamilyRepository {
         if (snapshot == null) return
         _syncStatus.value = when {
             snapshot.metadata.hasPendingWrites() -> SyncStatus.SYNCING
-            snapshot.metadata.isFromCache -> SyncStatus.OFFLINE
+            snapshot.metadata.isFromCache -> SyncStatus.SYNCING
             else -> SyncStatus.CONNECTED
         }
     }
