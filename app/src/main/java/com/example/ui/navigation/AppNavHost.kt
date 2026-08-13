@@ -33,82 +33,48 @@ fun AppNavHost(
     familyViewModel: FamilyViewModel = viewModel(),
     settingsViewModel: SettingsViewModel = viewModel()
 ) {
-    NavHost(
-        navController = navController,
-        startDestination = NavRoutes.SPLASH
-    ) {
-        // 1. Splash Screen
+    NavHost(navController = navController, startDestination = NavRoutes.SPLASH) {
         composable(NavRoutes.SPLASH) {
             SplashScreen(
                 authViewModel = authViewModel,
                 onNavigateNext = { isLoggedIn ->
-                    val destination = if (isLoggedIn) NavRoutes.HOME else NavRoutes.WELCOME
-                    navController.navigate(destination) {
+                    navController.navigate(if (isLoggedIn) NavRoutes.HOME else NavRoutes.WELCOME) {
                         popUpTo(NavRoutes.SPLASH) { inclusive = true }
                     }
                 }
             )
         }
 
-        // 2. Welcome / Login Screen
         composable(NavRoutes.WELCOME) {
-            val authState by authViewModel.authState.collectAsState()
             val context = LocalContext.current
-            val isLoading = authState is AuthState.Authenticating
-            val errorMessage = (authState as? AuthState.Error)?.message
-
             WelcomeScreen(
-                onGoogleSignInClick = {
-                    authViewModel.signInWithGoogle(context) {
-                        navController.navigate(NavRoutes.HOME) {
-                            popUpTo(NavRoutes.WELCOME) { inclusive = true }
-                        }
-                    }
-                },
-                onContinueWithoutAccountClick = {
+                onStartClick = {
                     authViewModel.continueAsLocalUser(context) {
                         navController.navigate(NavRoutes.HOME) {
                             popUpTo(NavRoutes.WELCOME) { inclusive = true }
                         }
                     }
-                },
-                isLoading = isLoading,
-                errorMessage = errorMessage
-            )
-        }
-
-        // 3. Family Home Screen
-        composable(NavRoutes.HOME) {
-            FamilyHomeScreen(
-                viewModel = familyViewModel,
-                onChildClick = { childId ->
-                    navController.navigate(NavRoutes.childProfile(childId))
-                },
-                onSettingsClick = {
-                    navController.navigate(NavRoutes.SETTINGS)
                 }
             )
         }
 
-        // 4. Child Profile Screen
+        composable(NavRoutes.HOME) {
+            FamilyHomeScreen(
+                viewModel = familyViewModel,
+                onChildClick = { childId -> navController.navigate(NavRoutes.childProfile(childId)) },
+                onSettingsClick = { navController.navigate(NavRoutes.SETTINGS) }
+            )
+        }
+
         composable(
             route = NavRoutes.CHILD_PROFILE,
             arguments = listOf(navArgument("childId") { type = NavType.StringType })
         ) { backStackEntry ->
             val childId = backStackEntry.arguments?.getString("childId") ?: ""
-            val childDetailViewModel: ChildDetailViewModel = viewModel(
-                key = childId,
-                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
-                    @Suppress("UNCHECKED_CAST")
-                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                        return ChildDetailViewModel(childId = childId) as T
-                    }
-                }
-            )
-
+            val vm: ChildDetailViewModel = viewModel(key = childId, factory = childDetailFactory(childId))
             ChildProfileScreen(
                 childId = childId,
-                viewModel = childDetailViewModel,
+                viewModel = vm,
                 onBackClick = { navController.popBackStack() },
                 onOpenAppointments = { navController.navigate(NavRoutes.childAppointments(childId)) },
                 onOpenTests = { navController.navigate(NavRoutes.childTests(childId)) },
@@ -117,111 +83,79 @@ fun AppNavHost(
             )
         }
 
-        // 4a. Child Appointments Section
         composable(
             route = NavRoutes.CHILD_APPOINTMENTS,
             arguments = listOf(navArgument("childId") { type = NavType.StringType })
         ) { backStackEntry ->
             val childId = backStackEntry.arguments?.getString("childId") ?: ""
-            val childDetailViewModel: ChildDetailViewModel = viewModel(
-                key = childId,
-                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
-                    @Suppress("UNCHECKED_CAST")
-                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                        return ChildDetailViewModel(childId = childId) as T
-                    }
-                }
-            )
-
-            AppointmentsSectionScreen(
-                viewModel = childDetailViewModel,
-                onBackClick = { navController.popBackStack() }
-            )
+            val vm: ChildDetailViewModel = viewModel(key = childId, factory = childDetailFactory(childId))
+            AppointmentsSectionScreen(viewModel = vm, onBackClick = { navController.popBackStack() })
         }
 
-        // 4b. Child Tests Section
         composable(
             route = NavRoutes.CHILD_TESTS,
             arguments = listOf(navArgument("childId") { type = NavType.StringType })
         ) { backStackEntry ->
             val childId = backStackEntry.arguments?.getString("childId") ?: ""
-            val childDetailViewModel: ChildDetailViewModel = viewModel(
-                key = childId,
-                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
-                    @Suppress("UNCHECKED_CAST")
-                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                        return ChildDetailViewModel(childId = childId) as T
-                    }
-                }
-            )
-
-            TestsSectionScreen(
-                viewModel = childDetailViewModel,
-                onBackClick = { navController.popBackStack() }
-            )
+            val vm: ChildDetailViewModel = viewModel(key = childId, factory = childDetailFactory(childId))
+            TestsSectionScreen(viewModel = vm, onBackClick = { navController.popBackStack() })
         }
 
-        // 4c. Child Lab Results Section
         composable(
             route = NavRoutes.CHILD_LAB_RESULTS,
             arguments = listOf(navArgument("childId") { type = NavType.StringType })
         ) { backStackEntry ->
             val childId = backStackEntry.arguments?.getString("childId") ?: ""
-            val childDetailViewModel: ChildDetailViewModel = viewModel(
-                key = childId,
-                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
-                    @Suppress("UNCHECKED_CAST")
-                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                        return ChildDetailViewModel(childId = childId) as T
-                    }
-                }
-            )
-
-            LabResultsSectionScreen(
-                viewModel = childDetailViewModel,
-                onBackClick = { navController.popBackStack() }
-            )
+            val vm: ChildDetailViewModel = viewModel(key = childId, factory = childDetailFactory(childId))
+            LabResultsSectionScreen(viewModel = vm, onBackClick = { navController.popBackStack() })
         }
 
-        // 4d. Child Glucose Section
         composable(
             route = NavRoutes.CHILD_GLUCOSE,
             arguments = listOf(navArgument("childId") { type = NavType.StringType })
         ) { backStackEntry ->
             val childId = backStackEntry.arguments?.getString("childId") ?: ""
-            val childDetailViewModel: ChildDetailViewModel = viewModel(
-                key = childId,
-                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
-                    @Suppress("UNCHECKED_CAST")
-                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                        return ChildDetailViewModel(childId = childId) as T
-                    }
-                }
-            )
-
-            GlucoseSectionScreen(
-                viewModel = childDetailViewModel,
-                onBackClick = { navController.popBackStack() }
-            )
+            val vm: ChildDetailViewModel = viewModel(key = childId, factory = childDetailFactory(childId))
+            GlucoseSectionScreen(viewModel = vm, onBackClick = { navController.popBackStack() })
         }
 
-        // 5. Settings Screen
         composable(NavRoutes.SETTINGS) {
             val currentUser by authViewModel.currentUser.collectAsState()
+            val authState by authViewModel.authState.collectAsState()
             val context = LocalContext.current
+            val isLocal = currentUser?.id?.startsWith("local_") != false
+            val busy = authState is AuthState.Authenticating
+            val authError = (authState as? AuthState.Error)?.message
 
             SettingsScreen(
                 currentUser = currentUser,
                 viewModel = settingsViewModel,
                 onBackClick = { navController.popBackStack() },
-                onSignOutClick = {
-                    authViewModel.signOut(context) {
-                        navController.navigate(NavRoutes.WELCOME) {
-                            popUpTo(NavRoutes.HOME) { inclusive = true }
-                        }
+                onAccountActionClick = {
+                    if (isLocal) {
+                        authViewModel.linkGoogleForSync(
+                            context = context,
+                            onSuccess = { },
+                            onError = { }
+                        )
+                    } else {
+                        authViewModel.unlinkGoogleSync(
+                            context = context,
+                            onSuccess = { },
+                            onError = { }
+                        )
                     }
-                }
+                },
+                isAccountBusy = busy,
+                accountErrorMessage = authError
             )
         }
+    }
+}
+
+private fun childDetailFactory(childId: String) = object : androidx.lifecycle.ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+        return ChildDetailViewModel(childId = childId) as T
     }
 }

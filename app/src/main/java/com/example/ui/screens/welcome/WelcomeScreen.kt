@@ -1,6 +1,5 @@
 package com.example.ui.screens.welcome
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,7 +27,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -39,7 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -52,10 +49,7 @@ import com.example.ui.theme.TealPrimary
 
 @Composable
 fun WelcomeScreen(
-    onGoogleSignInClick: () -> Unit,
-    onContinueWithoutAccountClick: () -> Unit = {},
-    isLoading: Boolean = false,
-    errorMessage: String? = null
+    onStartClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -76,7 +70,6 @@ fun WelcomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 24.dp)
             ) {
-                // Header Hero Graphic
                 Surface(
                     modifier = Modifier.size(90.dp),
                     shape = CircleShape,
@@ -94,7 +87,6 @@ fun WelcomeScreen(
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
-
                 Text(
                     text = "مواعيدنا",
                     style = MaterialTheme.typography.headlineLarge.copy(
@@ -103,11 +95,9 @@ fun WelcomeScreen(
                         color = TealDark
                     )
                 )
-
                 Spacer(modifier = Modifier.height(10.dp))
-
                 Text(
-                    text = "نظّم مواعيد وفحوصات ومتابعة أسرتك بسهولة.",
+                    text = "ابدأ على جهازك فوراً، واربط Google لاحقاً عندما تريد المزامنة بين أجهزتك.",
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Medium,
                         fontSize = 16.sp,
@@ -120,7 +110,6 @@ fun WelcomeScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Feature Highlights
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -132,7 +121,6 @@ fun WelcomeScreen(
                     backgroundColor = PastelCyanCard,
                     iconColor = TealPrimary
                 )
-
                 FeatureItemCard(
                     icon = Icons.Default.MedicalServices,
                     title = "الفحوصات والتحاليل الطبية",
@@ -140,7 +128,6 @@ fun WelcomeScreen(
                     backgroundColor = PastelBlueCard,
                     iconColor = Color(0xFF0288D1)
                 )
-
                 FeatureItemCard(
                     icon = Icons.Default.Bloodtype,
                     title = "سجل قياسات السكر",
@@ -152,125 +139,37 @@ fun WelcomeScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
+            Button(
+                onClick = onStartClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .testTag("start_now_button"),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = TealPrimary,
+                    contentColor = Color.White
+                ),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
             ) {
-                if (!errorMessage.isNullOrEmpty()) {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            text = errorMessage,
-                            color = Color(0xFFC62828),
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(12.dp),
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-
-                // 1. Google Sign In Button
-                Button(
-                    onClick = onGoogleSignInClick,
-                    enabled = !isLoading,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp)
-                        .testTag("google_sign_in_button"),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = TealPrimary,
-                        contentColor = Color.White
-                    ),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Surface(
-                                modifier = Modifier.size(28.dp),
-                                shape = CircleShape,
-                                color = Color.White
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "G",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp,
-                                        color = Color(0xFF4285F4)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Text(
-                                text = "المتابعة باستخدام Google",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                )
-                            )
-                        }
-                    }
-                }
-
                 Text(
-                    text = "مزامنة البيانات واسترجاعها من أي جهاز عبر السحابة",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.sp,
-                        color = Color(0xFF64748B)
-                    ),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 6.dp, bottom = 14.dp)
-                )
-
-                // 2. Continue Without Account Button (Local Mode)
-                androidx.compose.material3.OutlinedButton(
-                    onClick = onContinueWithoutAccountClick,
-                    enabled = !isLoading,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("continue_without_account_button"),
-                    shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.5.dp, TealPrimary),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = TealPrimary
+                    text = "ابدأ الآن",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
                     )
-                ) {
-                    Text(
-                        text = "المتابعة بدون حساب",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
-                        )
-                    )
-                }
-
-                Text(
-                    text = "حفظ البيانات محلياً على هذا الجهاز فقط مع الاحتفاظ بها عند إغلاق التطبيق",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.sp,
-                        color = Color(0xFF64748B)
-                    ),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 6.dp)
                 )
             }
+
+            Text(
+                text = "بياناتك تبدأ محلياً على هذا الجهاز. يمكنك ربط Google للمزامنة من الإعدادات في أي وقت.",
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B)
+                ),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 8.dp)
+            )
         }
     }
 }
