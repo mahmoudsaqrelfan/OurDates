@@ -6,8 +6,6 @@ import com.example.data.model.GlucoseReading
 import com.example.data.model.MealContext
 import com.example.data.model.TestAppointment
 import com.example.data.model.TestResult
-import com.example.data.model.TestStatus
-import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
@@ -38,7 +36,6 @@ interface HealthRecordsRepository {
 }
 
 class InMemoryHealthRecordsRepository : HealthRecordsRepository {
-
     private val _testResultsState = MutableStateFlow<List<TestResult>>(emptyList())
     private val _glucoseReadingsState = MutableStateFlow<List<GlucoseReading>>(emptyList())
 
@@ -46,147 +43,105 @@ class InMemoryHealthRecordsRepository : HealthRecordsRepository {
     private var glucoseListener: ListenerRegistration? = null
     private var activeUserId: String? = null
 
-    init {
-        // Initialize with local prefs fallback
-        val listRes = loadLocalResultsFromPrefs()
-        _testResultsState.value = listRes
-        val listGluc = loadLocalGlucoseFromPrefs()
-        _glucoseReadingsState.value = listGluc
-    }
-
-    override fun getTestAppointmentsForChild(childId: String): Flow<List<TestAppointment>> {
-        return MutableStateFlow<List<TestAppointment>>(emptyList()).asStateFlow()
-    }
+    override fun getTestAppointmentsForChild(childId: String): Flow<List<TestAppointment>> =
+        MutableStateFlow<List<TestAppointment>>(emptyList()).asStateFlow()
 
     override fun addTestAppointment(testAppointment: TestAppointment) {
-        // Handled via main AppointmentRepository
+        // Handled via main AppointmentRepository.
     }
 
-    override fun getTestResultsForChild(childId: String): Flow<List<TestResult>> = _testResultsState.map { list ->
-        list.filter { it.childId == childId }.sortedByDescending { it.createdAt }
-    }
+    override fun getTestResultsForChild(childId: String): Flow<List<TestResult>> =
+        _testResultsState.map { list -> list.filter { it.childId == childId }.sortedByDescending { it.createdAt } }
 
-    override fun getGlucoseReadingsForChild(childId: String): Flow<List<GlucoseReading>> = _glucoseReadingsState.map { list ->
-        list.filter { it.childId == childId }.sortedByDescending { it.createdAt }
-    }
+    override fun getGlucoseReadingsForChild(childId: String): Flow<List<GlucoseReading>> =
+        _glucoseReadingsState.map { list -> list.filter { it.childId == childId }.sortedByDescending { it.createdAt } }
 
     override fun getAllTestResults(): Flow<List<TestResult>> = _testResultsState.asStateFlow()
-
     override fun getAllGlucoseReadings(): Flow<List<GlucoseReading>> = _glucoseReadingsState.asStateFlow()
 
     override fun restoreHealthRecords(results: List<TestResult>, readings: List<GlucoseReading>) {
+        val userId = activeUserId ?: "local_user_mode"
         _testResultsState.value = results
         _glucoseReadingsState.value = readings
-        saveLocalResultsToPrefs(results)
-        saveLocalGlucoseToPrefs(readings)
+        saveResultsToPrefs(userId, results)
+        saveGlucoseToPrefs(userId, readings)
     }
 
     override fun attachUser(userId: String) {
         if (activeUserId == userId && (userId.startsWith("local_") || resultsListener != null)) return
-        clearUser()
+
+        removeListeners()
         activeUserId = userId
 
-        if (userId.startsWith("local_")) {
-            _testResultsState.value = loadLocalResultsFromPrefs()
-            _glucoseReadingsState.value = loadLocalGlucoseFromPrefs()
-            return
-        }
+        // Always restore only this account's cache. Local and Google data must never share storage.
+        _testResultsState.value = loadResultsFromPrefs(userId)
+        _glucoseReadingsState.value = loadGlucoseFromPrefs(userId)
 
-        // Google Mode: Sync results and glucose readings from Firestore in real-time
+        if (userId.startsWith("local_")) return
+
         try {
             val db = FirebaseFirestore.getInstance()
-            
-            // 1. Test Results snapshot listener
+
             resultsListener = db.collection("users").document(userId).collection("test_results")
                 .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        _testResultsState.value = loadLocalResultsFromPrefs()
-                        return@addSnapshotListener
-                    }
+                    if (error != null) return@addSnapshotListener
                     if (snapshot != null) {
                         val list = snapshot.documents.mapNotNull { doc ->
                             try {
-                                val id = doc.id
-                                val childId = doc.getString("childId") ?: ""
-                                val testName = doc.getString("testName") ?: ""
-                                val resultValue = doc.getString("resultValue") ?: ""
-                                val unit = doc.getString("unit") ?: ""
-                                val isNormal = doc.getBoolean("isNormal") ?: true
-                                val normalRangeText = doc.getString("normalRangeText") ?: ""
-                                val testDateText = doc.getString("testDateText") ?: ""
-                                val doctorNotes = doc.getString("doctorNotes") ?: ""
-                                val testDefinitionId = doc.getString("testDefinitionId")
-                                val testAppointmentId = doc.getString("testAppointmentId")
-                                val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
-                                val updatedAt = doc.getLong("updatedAt") ?: System.currentTimeMillis()
-
                                 TestResult(
-                                    id = id,
-                                    childId = childId,
-                                    testName = testName,
-                                    resultValue = resultValue,
-                                    unit = unit,
-                                    isNormal = isNormal,
-                                    normalRangeText = normalRangeText,
-                                    testDateText = testDateText,
-                                    doctorNotes = doctorNotes,
-                                    testDefinitionId = testDefinitionId,
-                                    testAppointmentId = testAppointmentId,
-                                    createdAt = createdAt,
-                                    updatedAt = updatedAt
+                                    id = doc.id,
+                                    childId = doc.getString("childId") ?: "",
+                                    testName = doc.getString("testName") ?: "",
+                                    resultValue = doc.getString("resultValue") ?: "",
+                                    unit = doc.getString("unit") ?: "",
+                                    isNormal = doc.getBoolean("isNormal") ?: true,
+                                    normalRangeText = doc.getString("normalRangeText") ?: "",
+                                    testDateText = doc.getString("testDateText") ?: "",
+                                    doctorNotes = doc.getString("doctorNotes") ?: "",
+                                    testDefinitionId = doc.getString("testDefinitionId"),
+                                    testAppointmentId = doc.getString("testAppointmentId"),
+                                    createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis(),
+                                    updatedAt = doc.getLong("updatedAt") ?: System.currentTimeMillis()
                                 )
-                            } catch (e: Exception) {
+                            } catch (_: Exception) {
                                 null
                             }
                         }
                         _testResultsState.value = list
-                        // Keep a backup local cache
-                        saveLocalResultsToPrefs(list)
+                        saveResultsToPrefs(userId, list)
                     }
                 }
 
-            // 2. Glucose Readings snapshot listener
             glucoseListener = db.collection("users").document(userId).collection("glucose_readings")
                 .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        _glucoseReadingsState.value = loadLocalGlucoseFromPrefs()
-                        return@addSnapshotListener
-                    }
+                    if (error != null) return@addSnapshotListener
                     if (snapshot != null) {
                         val list = snapshot.documents.mapNotNull { doc ->
                             try {
-                                val id = doc.id
-                                val childId = doc.getString("childId") ?: ""
-                                val readingValue = doc.getLong("readingValue")?.toInt() ?: 100
-                                val unit = doc.getString("unit") ?: "mg/dL"
-                                val mealContextStr = doc.getString("mealContext") ?: "RANDOM"
-                                val mealContext = try { MealContext.valueOf(mealContextStr) } catch (e: Exception) { MealContext.RANDOM }
-                                val dateText = doc.getString("dateText") ?: ""
-                                val timeText = doc.getString("timeText") ?: ""
-                                val isTargetRange = doc.getBoolean("isTargetRange") ?: true
-                                val notes = doc.getString("notes") ?: ""
-                                val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
-                                val updatedAt = doc.getLong("updatedAt") ?: System.currentTimeMillis()
-
+                                val mealContext = try {
+                                    MealContext.valueOf(doc.getString("mealContext") ?: "RANDOM")
+                                } catch (_: Exception) {
+                                    MealContext.RANDOM
+                                }
                                 GlucoseReading(
-                                    id = id,
-                                    childId = childId,
-                                    readingValue = readingValue,
-                                    unit = unit,
+                                    id = doc.id,
+                                    childId = doc.getString("childId") ?: "",
+                                    readingValue = doc.getLong("readingValue")?.toInt() ?: 100,
+                                    unit = doc.getString("unit") ?: "mg/dL",
                                     mealContext = mealContext,
-                                    dateText = dateText,
-                                    timeText = timeText,
-                                    isTargetRange = isTargetRange,
-                                    notes = notes,
-                                    createdAt = createdAt,
-                                    updatedAt = updatedAt
+                                    dateText = doc.getString("dateText") ?: "",
+                                    timeText = doc.getString("timeText") ?: "",
+                                    isTargetRange = doc.getBoolean("isTargetRange") ?: true,
+                                    notes = doc.getString("notes") ?: "",
+                                    createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis(),
+                                    updatedAt = doc.getLong("updatedAt") ?: System.currentTimeMillis()
                                 )
-                            } catch (e: Exception) {
+                            } catch (_: Exception) {
                                 null
                             }
                         }
                         _glucoseReadingsState.value = list
-                        saveLocalGlucoseToPrefs(list)
+                        saveGlucoseToPrefs(userId, list)
                     }
                 }
         } catch (e: Exception) {
@@ -194,30 +149,34 @@ class InMemoryHealthRecordsRepository : HealthRecordsRepository {
         }
     }
 
-    override fun clearUser() {
+    private fun removeListeners() {
         resultsListener?.remove()
         resultsListener = null
         glucoseListener?.remove()
         glucoseListener = null
+    }
+
+    override fun clearUser() {
+        removeListeners()
         activeUserId = null
         _testResultsState.value = emptyList()
         _glucoseReadingsState.value = emptyList()
     }
 
     override fun addTestResult(testResult: TestResult) {
-        val currentUserId = activeUserId ?: "local_user_mode"
-        val toSave = if (testResult.id.isBlank()) testResult.copy(id = "res_${UUID.randomUUID().toString().take(8)}") else testResult
+        val userId = activeUserId ?: "local_user_mode"
+        val toSave = if (testResult.id.isBlank()) {
+            testResult.copy(id = "res_${UUID.randomUUID().toString().take(8)}")
+        } else testResult
 
-        if (currentUserId.startsWith("local_")) {
-            val newList = _testResultsState.value + toSave
-            _testResultsState.value = newList
-            saveLocalResultsToPrefs(newList)
-            return
-        }
+        val newList = _testResultsState.value.filterNot { it.id == toSave.id } + toSave
+        _testResultsState.value = newList
+        saveResultsToPrefs(userId, newList)
 
+        if (userId.startsWith("local_")) return
         try {
-            val db = FirebaseFirestore.getInstance()
-            db.collection("users").document(currentUserId).collection("test_results").document(toSave.id)
+            FirebaseFirestore.getInstance().collection("users").document(userId)
+                .collection("test_results").document(toSave.id)
                 .set(mapResultToMap(toSave), SetOptions.merge())
         } catch (e: Exception) {
             e.printStackTrace()
@@ -225,19 +184,16 @@ class InMemoryHealthRecordsRepository : HealthRecordsRepository {
     }
 
     override fun updateTestResult(testResult: TestResult) {
-        val currentUserId = activeUserId ?: "local_user_mode"
+        val userId = activeUserId ?: "local_user_mode"
         val updated = testResult.copy(updatedAt = System.currentTimeMillis())
+        val newList = _testResultsState.value.map { if (it.id == updated.id) updated else it }
+        _testResultsState.value = newList
+        saveResultsToPrefs(userId, newList)
 
-        if (currentUserId.startsWith("local_")) {
-            val newList = _testResultsState.value.map { if (it.id == updated.id) updated else it }
-            _testResultsState.value = newList
-            saveLocalResultsToPrefs(newList)
-            return
-        }
-
+        if (userId.startsWith("local_")) return
         try {
-            val db = FirebaseFirestore.getInstance()
-            db.collection("users").document(currentUserId).collection("test_results").document(updated.id)
+            FirebaseFirestore.getInstance().collection("users").document(userId)
+                .collection("test_results").document(updated.id)
                 .set(mapResultToMap(updated), SetOptions.merge())
         } catch (e: Exception) {
             e.printStackTrace()
@@ -245,168 +201,147 @@ class InMemoryHealthRecordsRepository : HealthRecordsRepository {
     }
 
     override fun deleteTestResult(id: String) {
-        val currentUserId = activeUserId ?: "local_user_mode"
+        val userId = activeUserId ?: "local_user_mode"
+        val newList = _testResultsState.value.filterNot { it.id == id }
+        _testResultsState.value = newList
+        saveResultsToPrefs(userId, newList)
 
-        if (currentUserId.startsWith("local_")) {
-            val newList = _testResultsState.value.filterNot { it.id == id }
-            _testResultsState.value = newList
-            saveLocalResultsToPrefs(newList)
-            return
-        }
-
+        if (userId.startsWith("local_")) return
         try {
-            val db = FirebaseFirestore.getInstance()
-            db.collection("users").document(currentUserId).collection("test_results").document(id)
-                .delete()
+            FirebaseFirestore.getInstance().collection("users").document(userId)
+                .collection("test_results").document(id).delete()
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
     override fun addGlucoseReading(glucoseReading: GlucoseReading) {
-        val currentUserId = activeUserId ?: "local_user_mode"
-        val toSave = if (glucoseReading.id.isBlank()) glucoseReading.copy(id = "gluc_${UUID.randomUUID().toString().take(8)}") else glucoseReading
+        val userId = activeUserId ?: "local_user_mode"
+        val toSave = if (glucoseReading.id.isBlank()) {
+            glucoseReading.copy(id = "gluc_${UUID.randomUUID().toString().take(8)}")
+        } else glucoseReading
 
-        if (currentUserId.startsWith("local_")) {
-            val newList = _glucoseReadingsState.value + toSave
-            _glucoseReadingsState.value = newList
-            saveLocalGlucoseToPrefs(newList)
-            return
-        }
+        val newList = _glucoseReadingsState.value.filterNot { it.id == toSave.id } + toSave
+        _glucoseReadingsState.value = newList
+        saveGlucoseToPrefs(userId, newList)
 
-        try {
-            val db = FirebaseFirestore.getInstance()
-            val gMap = mapOf(
-                "id" to toSave.id,
-                "childId" to toSave.childId,
-                "readingValue" to toSave.readingValue,
-                "unit" to toSave.unit,
-                "mealContext" to toSave.mealContext.name,
-                "dateText" to toSave.dateText,
-                "timeText" to toSave.timeText,
-                "isTargetRange" to toSave.isTargetRange,
-                "notes" to toSave.notes,
-                "createdAt" to toSave.createdAt,
-                "updatedAt" to toSave.updatedAt
-            )
-            db.collection("users").document(currentUserId).collection("glucose_readings").document(toSave.id)
-                .set(gMap, SetOptions.merge())
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        if (userId.startsWith("local_")) return
+        writeGlucoseToFirestore(userId, toSave)
     }
 
     override fun updateGlucoseReading(glucoseReading: GlucoseReading) {
-        val currentUserId = activeUserId ?: "local_user_mode"
+        val userId = activeUserId ?: "local_user_mode"
         val updated = glucoseReading.copy(updatedAt = System.currentTimeMillis())
+        val newList = _glucoseReadingsState.value.map { if (it.id == updated.id) updated else it }
+        _glucoseReadingsState.value = newList
+        saveGlucoseToPrefs(userId, newList)
 
-        if (currentUserId.startsWith("local_")) {
-            val newList = _glucoseReadingsState.value.map { if (it.id == updated.id) updated else it }
-            _glucoseReadingsState.value = newList
-            saveLocalGlucoseToPrefs(newList)
-            return
-        }
-
-        try {
-            val db = FirebaseFirestore.getInstance()
-            val gMap = mapOf(
-                "id" to updated.id,
-                "childId" to updated.childId,
-                "readingValue" to updated.readingValue,
-                "unit" to updated.unit,
-                "mealContext" to updated.mealContext.name,
-                "dateText" to updated.dateText,
-                "timeText" to updated.timeText,
-                "isTargetRange" to updated.isTargetRange,
-                "notes" to updated.notes,
-                "createdAt" to updated.createdAt,
-                "updatedAt" to updated.updatedAt
-            )
-            db.collection("users").document(currentUserId).collection("glucose_readings").document(updated.id)
-                .set(gMap, SetOptions.merge())
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        if (userId.startsWith("local_")) return
+        writeGlucoseToFirestore(userId, updated)
     }
 
     override fun deleteGlucoseReading(id: String) {
-        val currentUserId = activeUserId ?: "local_user_mode"
+        val userId = activeUserId ?: "local_user_mode"
+        val newList = _glucoseReadingsState.value.filterNot { it.id == id }
+        _glucoseReadingsState.value = newList
+        saveGlucoseToPrefs(userId, newList)
 
-        if (currentUserId.startsWith("local_")) {
-            val newList = _glucoseReadingsState.value.filterNot { it.id == id }
-            _glucoseReadingsState.value = newList
-            saveLocalGlucoseToPrefs(newList)
-            return
-        }
-
+        if (userId.startsWith("local_")) return
         try {
-            val db = FirebaseFirestore.getInstance()
-            db.collection("users").document(currentUserId).collection("glucose_readings").document(id)
-                .delete()
+            FirebaseFirestore.getInstance().collection("users").document(userId)
+                .collection("glucose_readings").document(id).delete()
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    private fun mapResultToMap(res: TestResult): Map<String, Any?> {
-        return mapOf(
-            "id" to res.id,
-            "childId" to res.childId,
-            "testName" to res.testName,
-            "resultValue" to res.resultValue,
-            "unit" to res.unit,
-            "isNormal" to res.isNormal,
-            "normalRangeText" to res.normalRangeText,
-            "testDateText" to res.testDateText,
-            "doctorNotes" to res.doctorNotes,
-            "testDefinitionId" to res.testDefinitionId,
-            "testAppointmentId" to res.testAppointmentId,
-            "createdAt" to res.createdAt,
-            "updatedAt" to res.updatedAt
-        )
+    private fun writeGlucoseToFirestore(userId: String, reading: GlucoseReading) {
+        try {
+            val map = mapOf(
+                "id" to reading.id,
+                "childId" to reading.childId,
+                "readingValue" to reading.readingValue,
+                "unit" to reading.unit,
+                "mealContext" to reading.mealContext.name,
+                "dateText" to reading.dateText,
+                "timeText" to reading.timeText,
+                "isTargetRange" to reading.isTargetRange,
+                "notes" to reading.notes,
+                "createdAt" to reading.createdAt,
+                "updatedAt" to reading.updatedAt
+            )
+            FirebaseFirestore.getInstance().collection("users").document(userId)
+                .collection("glucose_readings").document(reading.id)
+                .set(map, SetOptions.merge())
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
-    // --- Local JSON Serialization for Preferences (Local Mode and cache fallback) ---
+    private fun mapResultToMap(res: TestResult): Map<String, Any?> = mapOf(
+        "id" to res.id,
+        "childId" to res.childId,
+        "testName" to res.testName,
+        "resultValue" to res.resultValue,
+        "unit" to res.unit,
+        "isNormal" to res.isNormal,
+        "normalRangeText" to res.normalRangeText,
+        "testDateText" to res.testDateText,
+        "doctorNotes" to res.doctorNotes,
+        "testDefinitionId" to res.testDefinitionId,
+        "testAppointmentId" to res.testAppointmentId,
+        "createdAt" to res.createdAt,
+        "updatedAt" to res.updatedAt
+    )
 
-    private fun saveLocalResultsToPrefs(results: List<TestResult>) {
+    private fun resultsPrefsName(userId: String): String =
+        if (userId.startsWith("local_")) "mawaeedna_local_results_prefs"
+        else "mawaeedna_results_cache_${safeUserKey(userId)}"
+
+    private fun glucosePrefsName(userId: String): String =
+        if (userId.startsWith("local_")) "mawaeedna_local_glucose_prefs"
+        else "mawaeedna_glucose_cache_${safeUserKey(userId)}"
+
+    private fun safeUserKey(userId: String): String = userId.replace(Regex("[^A-Za-z0-9_-]"), "_")
+
+    private fun saveResultsToPrefs(userId: String, results: List<TestResult>) {
         try {
             val context = MawaeednaApplication.appContext ?: return
-            val prefs = context.getSharedPreferences("mawaeedna_local_results_prefs", Context.MODE_PRIVATE)
-            val jsonArray = JSONArray()
-            for (res in results) {
-                val obj = JSONObject()
-                obj.put("id", res.id)
-                obj.put("childId", res.childId)
-                obj.put("testName", res.testName)
-                obj.put("resultValue", res.resultValue)
-                obj.put("unit", res.unit)
-                obj.put("isNormal", res.isNormal)
-                obj.put("normalRangeText", res.normalRangeText)
-                obj.put("testDateText", res.testDateText)
-                obj.put("doctorNotes", res.doctorNotes)
-                obj.put("testDefinitionId", res.testDefinitionId ?: "")
-                obj.put("testAppointmentId", res.testAppointmentId ?: "")
-                obj.put("createdAt", res.createdAt)
-                obj.put("updatedAt", res.updatedAt)
-                jsonArray.put(obj)
+            val prefs = context.getSharedPreferences(resultsPrefsName(userId), Context.MODE_PRIVATE)
+            val array = JSONArray()
+            results.forEach { res ->
+                array.put(JSONObject().apply {
+                    put("id", res.id)
+                    put("childId", res.childId)
+                    put("testName", res.testName)
+                    put("resultValue", res.resultValue)
+                    put("unit", res.unit)
+                    put("isNormal", res.isNormal)
+                    put("normalRangeText", res.normalRangeText)
+                    put("testDateText", res.testDateText)
+                    put("doctorNotes", res.doctorNotes)
+                    put("testDefinitionId", res.testDefinitionId ?: "")
+                    put("testAppointmentId", res.testAppointmentId ?: "")
+                    put("createdAt", res.createdAt)
+                    put("updatedAt", res.updatedAt)
+                })
             }
-            prefs.edit().putString("results_json", jsonArray.toString()).apply()
+            prefs.edit().putString("results_json", array.toString()).apply()
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    private fun loadLocalResultsFromPrefs(): List<TestResult> {
+    private fun loadResultsFromPrefs(userId: String): List<TestResult> {
         return try {
             val context = MawaeednaApplication.appContext ?: return emptyList()
-            val prefs = context.getSharedPreferences("mawaeedna_local_results_prefs", Context.MODE_PRIVATE)
-            val jsonStr = prefs.getString("results_json", null) ?: return emptyList()
-            val jsonArray = JSONArray(jsonStr)
-            val list = mutableListOf<TestResult>()
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                list.add(
-                    TestResult(
+            val prefs = context.getSharedPreferences(resultsPrefsName(userId), Context.MODE_PRIVATE)
+            val json = prefs.getString("results_json", null) ?: return emptyList()
+            val array = JSONArray(json)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    add(TestResult(
                         id = obj.getString("id"),
                         childId = obj.getString("childId"),
                         testName = obj.getString("testName"),
@@ -420,54 +355,55 @@ class InMemoryHealthRecordsRepository : HealthRecordsRepository {
                         testAppointmentId = obj.optString("testAppointmentId").ifBlank { null },
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                         updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
-                    )
-                )
+                    ))
+                }
             }
-            list
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             emptyList()
         }
     }
 
-    private fun saveLocalGlucoseToPrefs(readings: List<GlucoseReading>) {
+    private fun saveGlucoseToPrefs(userId: String, readings: List<GlucoseReading>) {
         try {
             val context = MawaeednaApplication.appContext ?: return
-            val prefs = context.getSharedPreferences("mawaeedna_local_glucose_prefs", Context.MODE_PRIVATE)
-            val jsonArray = JSONArray()
-            for (g in readings) {
-                val obj = JSONObject()
-                obj.put("id", g.id)
-                obj.put("childId", g.childId)
-                obj.put("readingValue", g.readingValue)
-                obj.put("unit", g.unit)
-                obj.put("mealContext", g.mealContext.name)
-                obj.put("dateText", g.dateText)
-                obj.put("timeText", g.timeText)
-                obj.put("isTargetRange", g.isTargetRange)
-                obj.put("notes", g.notes)
-                obj.put("createdAt", g.createdAt)
-                obj.put("updatedAt", g.updatedAt)
-                jsonArray.put(obj)
+            val prefs = context.getSharedPreferences(glucosePrefsName(userId), Context.MODE_PRIVATE)
+            val array = JSONArray()
+            readings.forEach { reading ->
+                array.put(JSONObject().apply {
+                    put("id", reading.id)
+                    put("childId", reading.childId)
+                    put("readingValue", reading.readingValue)
+                    put("unit", reading.unit)
+                    put("mealContext", reading.mealContext.name)
+                    put("dateText", reading.dateText)
+                    put("timeText", reading.timeText)
+                    put("isTargetRange", reading.isTargetRange)
+                    put("notes", reading.notes)
+                    put("createdAt", reading.createdAt)
+                    put("updatedAt", reading.updatedAt)
+                })
             }
-            prefs.edit().putString("glucose_json", jsonArray.toString()).apply()
+            prefs.edit().putString("glucose_json", array.toString()).apply()
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    private fun loadLocalGlucoseFromPrefs(): List<GlucoseReading> {
+    private fun loadGlucoseFromPrefs(userId: String): List<GlucoseReading> {
         return try {
             val context = MawaeednaApplication.appContext ?: return emptyList()
-            val prefs = context.getSharedPreferences("mawaeedna_local_glucose_prefs", Context.MODE_PRIVATE)
-            val jsonStr = prefs.getString("glucose_json", null) ?: return emptyList()
-            val jsonArray = JSONArray(jsonStr)
-            val list = mutableListOf<GlucoseReading>()
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                val mealStr = obj.optString("mealContext", "RANDOM")
-                val mealContext = try { MealContext.valueOf(mealStr) } catch (e: Exception) { MealContext.RANDOM }
-                list.add(
-                    GlucoseReading(
+            val prefs = context.getSharedPreferences(glucosePrefsName(userId), Context.MODE_PRIVATE)
+            val json = prefs.getString("glucose_json", null) ?: return emptyList()
+            val array = JSONArray(json)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val mealContext = try {
+                        MealContext.valueOf(obj.optString("mealContext", "RANDOM"))
+                    } catch (_: Exception) {
+                        MealContext.RANDOM
+                    }
+                    add(GlucoseReading(
                         id = obj.getString("id"),
                         childId = obj.getString("childId"),
                         readingValue = obj.getInt("readingValue"),
@@ -479,11 +415,10 @@ class InMemoryHealthRecordsRepository : HealthRecordsRepository {
                         notes = obj.optString("notes", ""),
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                         updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
-                    )
-                )
+                    ))
+                }
             }
-            list
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             emptyList()
         }
     }
